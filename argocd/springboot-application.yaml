@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: springboot-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/abhi002shek/observability-eks-gitops.git
+    targetRevision: HEAD
+    path: apps/springboot
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: app
+  syncPolicy:
+    automated:
+      prune: true        # removes resources deleted from Git
+      selfHeal: true     # auto-fixes manual kubectl changes (drift correction)
+    syncOptions:
+      - CreateNamespace=true

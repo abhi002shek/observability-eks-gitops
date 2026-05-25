@@ -1,0 +1,88 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: springboot-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: springboot.alerts
+      rules:
+
+        # ── SLO: Error rate > 1% for 2 min ──────────────────────────────
+        - alert: HighErrorRate
+          expr: |
+            sum(rate(http_server_requests_seconds_count{namespace="app", status=~"5.."}[2m]))
+            /
+            sum(rate(http_server_requests_seconds_count{namespace="app"}[2m])) > 0.01
+          for: 2m
+          labels:
+            severity: critical
+            team: sre
+          annotations:
+            summary: "High error rate on Spring Boot app"
+            description: "Error rate is {{ $value | humanizePercentage }} — SLO breach risk"
+
+        # ── SLO: Burn rate too fast (consuming error budget) ────────────
+        - alert: SLOBurnRateCritical
+          expr: job:springboot_burn_rate:5m > 0.001
+          for: 5m
+          labels:
+            severity: critical
+            team: sre
+          annotations:
+            summary: "SLO burn rate critical"
+            description: "Burn rate {{ $value }} — at this rate SLO will be breached"
+
+        # ── Latency: P95 > 500ms ─────────────────────────────────────────
+        - alert: HighP95Latency
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(http_server_requests_seconds_bucket{namespace="app"}[5m])) by (le)
+            ) > 0.5
+          for: 3m
+          labels:
+            severity: warning
+            team: sre
+          annotations:
+            summary: "P95 latency above 500ms"
+            description: "P95 latency is {{ $value | humanizeDuration }}"
+
+        # ── JVM: Heap usage > 85% ────────────────────────────────────────
+        - alert: JVMHeapCritical
+          expr: |
+            jvm_memory_used_bytes{area="heap"}
+            /
+            jvm_memory_max_bytes{area="heap"} > 0.85
+          for: 3m
+          labels:
+            severity: warning
+            team: sre
+          annotations:
+            summary: "JVM heap usage above 85%"
+            description: "Heap at {{ $value | humanizePercentage }} — OOM risk"
+
+        # ── Pod down ─────────────────────────────────────────────────────
+        - alert: SpringBootPodDown
+          expr: |
+            kube_deployment_status_replicas_available{namespace="app", deployment="springboot-app"} < 1
+          for: 1m
+          labels:
+            severity: critical
+            team: sre
+          annotations:
+            summary: "Spring Boot app has no available pods"
+            description: "All pods are down in namespace app"
+
+        # ── Pod restart loop ─────────────────────────────────────────────
+        - alert: PodRestartLoop
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="app"}[15m]) > 3
+          for: 0m
+          labels:
+            severity: warning
+            team: sre
+          annotations:
+            summary: "Pod restarting frequently"
+            description: "Pod {{ $labels.pod }} restarted {{ $value }} times in 15 min"

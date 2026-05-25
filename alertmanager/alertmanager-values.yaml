@@ -1,0 +1,36 @@
+# AlertManager config — patch into kube-prometheus-stack via Helm values
+# Usage: helm upgrade kube-prometheus-stack ... -f alertmanager/alertmanager-values.yaml
+
+alertmanager:
+  config:
+    global:
+      resolve_timeout: 5m
+
+    route:
+      group_by: ['alertname', 'namespace']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 1h
+      receiver: 'slack-sre'
+      routes:
+        - match:
+            severity: critical
+          receiver: 'slack-sre'
+          continue: true
+        - match:
+            severity: warning
+          receiver: 'slack-sre'
+
+    receivers:
+      - name: 'slack-sre'
+        slack_configs:
+          - api_url: 'YOUR_SLACK_WEBHOOK_URL'   # replace with real webhook
+            channel: '#sre-alerts'
+            title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+            text: |
+              {{ range .Alerts }}
+              *Alert:* {{ .Annotations.summary }}
+              *Description:* {{ .Annotations.description }}
+              *Severity:* {{ .Labels.severity }}
+              {{ end }}
+            send_resolved: true
