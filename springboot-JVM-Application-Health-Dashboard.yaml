@@ -1,0 +1,144 @@
+This dashboard focuses on JVM internals. Heap usage shows memory behavior, GC pause time shows latency impact from garbage collection, CPU indicates processing load, and thread count shows concurrency.
+If I see high heap and GC pauses, I suspect memory pressure. If CPU and threads are high, it’s likely compute saturation. I always correlate these with latency to identify the root cause.
+
+dashboard_panels:
+
+  heap_usage:
+    panel_name: "Heap Usage %"
+    description: >
+      Represents JVM heap memory utilization across different regions
+      (Eden, Survivor, Old Gen). It reflects object allocation and memory pressure.
+
+    metric_source:
+      - jvm_memory_used_bytes
+      - jvm_memory_max_bytes
+
+    promql: |
+      (sum(jvm_memory_used_bytes{area="heap"}) / 
+       sum(jvm_memory_max_bytes{area="heap"})) * 100
+
+    sre_interpretation:
+      normal_behavior:
+        - Sawtooth pattern (increase → GC → drop)
+        - Young Gen fluctuates frequently
+      abnormal_behavior:
+        - Continuous increase → memory leak
+        - No drop after GC → Old Gen pressure
+        - Very high usage (>80%) → risk of OOM
+
+    sre_use_cases:
+      - Detecting memory leaks
+      - Understanding allocation patterns
+      - Capacity planning for JVM heap
+
+    interview_line: >
+      “Heap usage typically follows a sawtooth pattern due to GC.
+      If it keeps increasing without dropping, it indicates a memory leak or Old Gen pressure.”
+
+  gc_pause_time:
+    panel_name: "GC Pause Time"
+    description: >
+      Measures the time taken by JVM garbage collection pauses (Stop-The-World events).
+      Indicates latency impact due to memory management.
+
+    metric_source: "jvm_gc_pause_seconds"
+
+    promql: |
+      rate(jvm_gc_pause_seconds_sum[5m]) /
+      rate(jvm_gc_pause_seconds_count[5m])
+
+    sre_interpretation:
+      normal_behavior:
+        - Low and stable (few ms)
+      abnormal_behavior:
+        - Sudden spikes → Full GC or memory pressure
+        - Increasing trend → inefficient GC or heap sizing issue
+
+    sre_use_cases:
+      - Latency analysis
+      - Detecting GC-related performance issues
+      - JVM tuning decisions
+
+    interview_line: >
+      “GC pause time directly impacts latency because the application stops during GC.
+      Spikes here usually correlate with P95 latency increases.”
+
+    correlation_signals:
+      - High GC pause + high latency → GC issue
+      - High GC pause + high heap → memory pressure
+
+  cpu_usage:
+    panel_name: "CPU Usage (%)"
+    description: >
+      Represents CPU utilization of the application container.
+      Indicates how much processing power the app is consuming.
+
+    metric_source: "container_cpu_usage_seconds_total"
+
+    promql: |
+      sum(rate(container_cpu_usage_seconds_total[1m])) * 100
+
+    sre_interpretation:
+      normal_behavior:
+        - Stable usage under normal load
+      abnormal_behavior:
+        - Sudden spike → traffic surge or inefficient code
+        - High CPU + low throughput → bottleneck
+        - Drop to zero → container stopped
+
+    sre_use_cases:
+      - Detecting CPU saturation
+      - Identifying inefficient processing
+      - Autoscaling triggers
+
+    interview_line: >
+      “CPU usage helps me understand processing load.
+      If CPU is high with latency, it indicates compute bottleneck.”
+
+    eks_context:
+      note: >
+        In Kubernetes, also check CPU throttling metrics
+        (container_cpu_cfs_throttled_seconds_total).
+
+  thread_usage:
+    panel_name: "Thread Usage"
+    description: >
+      Represents the number of live JVM threads.
+      Indicates concurrency level and thread pool behavior.
+
+    metric_source: "jvm_threads_live_threads"
+
+    promql: |
+      jvm_threads_live_threads
+
+    sre_interpretation:
+      normal_behavior:
+        - Stable thread count
+      abnormal_behavior:
+        - Gradual increase → thread leak
+        - Sudden spike → traffic burst or blocking calls
+        - High threads → context switching overhead
+
+    sre_use_cases:
+      - Detecting thread leaks
+      - Monitoring thread pool utilization
+      - Identifying blocking operations
+
+    interview_line: >
+      “Thread count reflects concurrency.
+      If threads keep increasing without dropping, it usually indicates a leak or blocked threads.”
+
+  correlation_analysis:
+
+    how_to_read_together:
+      - High heap + high GC pause → memory pressure
+      - High GC pause + high latency → GC impacting performance
+      - High CPU + high threads → compute saturation
+      - Low CPU + high threads → blocking IO issue
+      - Heap increasing + no GC drop → memory leak
+
+    sre_interview_summary: >
+      “These JVM metrics help me understand memory and execution behavior.
+      Heap usage shows allocation patterns, GC pause shows latency impact,
+      CPU shows processing load, and threads indicate concurrency.
+      Together, they help identify memory leaks, GC issues, and system saturation.”

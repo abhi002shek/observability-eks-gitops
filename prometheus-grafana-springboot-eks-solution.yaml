@@ -1,0 +1,161 @@
+End-to-end Flow:
+
+Spring Boot (Micrometer)  ──>  /actuator/prometheus
+          │
+          ▼
+K8s Service (ClusterIP + named port)
+          │
+          ▼
+ServiceMonitor (CRD → discovery rule)
+          │
+          ▼
+Prometheus (kube-prometheus-stack)
+          │
+          ▼
+Grafana (queries Prometheus via PromQL)
+          │
+          ▼
+Dashboards + Alerts (Slack/Email)
+
+1. EKS cluster:
+This gives:
+Managed control plane
+Worker nodes for scheduling pods
+
+2. Spring Boot app with metrics (Micrometer + Actuator):
+Key dependencies:
+- `spring-boot-starter-actuator` #instrumentation layer
+- `micrometer-registry-prometheus` #exposes metrics in Prometheus format
+
+Where metrics are exposed:
+application.properties:
+management.endpoints.web.exposure.include=*
+management.endpoint.prometheus.enabled=true
+management.metrics.export.prometheus.enabled=true
+
+This enables:
+http://<pod>:8080/actuator/prometheus
+
+What this endpoint actually returns:
+Plain text (Prometheus exposition format):
+jvm_memory_used_bytes{area="heap"} 3.5E7
+http_server_requests_seconds_count{method="GET"} 120
+process_cpu_usage 0.12
+
+Prometheus does not pull from JVM directly
+It scrapes this HTTP endpoint
+
+ Infrastructure Monitoring:
+    definition: "Monitoring the underlying infrastructure (servers, nodes, VMs) that applications run on."
+    For a Kubernetes cluster, this includes:
+      - Node metrics (CPU, memory, disk, network) - via an agent like node-exporter
+      - Control plane metrics (API server, scheduler, controller manager, coredns)
+      - Cluster-level metrics [Pods, Deployments, daemonsets etc] - via kube-state-metrics
+      - Container metrics (CPU, memory usage of containers) - via cAdvisor or kubelet
+
+Kubernetes Deployment + Service:
+Deployment
+Runs your container
+
+labels:
+  app: springboot
+
+Service (CRITICAL for scraping)
+spec:
+  selector:
+    app: springboot
+  ports:
+    - name: http   # VERY IMPORTANT
+      port: 80
+      targetPort: 8080
+
+Why name: http matters:
+ServiceMonitor references port by name, not number
+
+kube-prometheus-stack (Prometheus Operator)
+
+Installed via Helm:
+helm install prometheus prometheus-community/kube-prometheus-stack
+
+This gives you:
+Prometheus (scraping engine)
+Grafana (visualization)
+Alertmanager (routing alerts)
+
+CRDs:
+ServiceMonitor
+PodMonitor
+PrometheusRule
+
+How Prometheus discovers your app:
+Prometheus does NOT scan services automatically
+It uses:
+ServiceMonitor → defines WHAT to scrape
+
+ServiceMonitor (config):
+spec:
+  selector:
+    matchLabels:
+      app: springboot
+  namespaceSelector:
+    matchNames:
+      - app
+  endpoints:
+    - port: http
+      path: /actuator/prometheus
+
+What happens internally
+Prometheus Operator watches ServiceMonitor
+Converts it into Prometheus scrape config
+
+Prometheus discovers:
+springboot-service.app.svc.cluster.local:80
+
+Scrapes:
+/actuator/prometheus
+
+Discovery is label-driven. No label → no scraping → no data.
+
+How metrics reach Grafana:
+Prometheus stores time-series → Grafana queries via PromQL
+
+Example query (Grafana):
+jvm_memory_used_bytes
+
+Grafana sends:
+GET /api/v1/query?query=jvm_memory_used_bytes
+
+Key metrics (what you are actually seeing)
+JVM:
+jvm_memory_used_bytes
+jvm_gc_pause_seconds
+jvm_threads_live_threads
+
+Used for:
+memory pressure
+GC tuning
+thread exhaustion
+
+HTTP (Micrometer auto-instrumentation)
+http_server_requests_seconds_count
+http_server_requests_seconds_bucket
+
+Used for:
+
+traffic
+latency
+error rate
+
+Process / System:
+process_cpu_usage
+process_uptime_seconds
+system_load_average_1m
+
+How to explain this in an SRE interview?:
+We instrumented a Spring Boot application using Micrometer with Prometheus registry, exposing metrics via /actuator/prometheus.
+In Kubernetes, we exposed the app using a Service with a named port.
+Then we used kube-prometheus-stack, where Prometheus discovers targets using ServiceMonitor CRDs.
+We ensured label alignment using the release: prometheus selector so Prometheus could pick our ServiceMonitor.
+Prometheus scrapes metrics periodically and stores them as time-series.
+Grafana queries Prometheus using PromQL to build dashboards around golden signals like latency, traffic, errors, and saturation.
+Finally, we configured alerting rules and routed alerts via Slack and email for proactive incident response.”

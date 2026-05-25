@@ -1,0 +1,192 @@
+observability_runbook:
+
+  prerequisites:
+    - step: configure_aws
+      command: aws configure
+      purpose: "Authenticate AWS CLI to create and manage EKS resources"
+
+    - step: verify_tools
+      command: |
+        kubectl version
+        eksctl version
+        helm version
+      purpose: "Ensure required CLI tools are installed and working"
+
+  eks_cluster:
+    - step: create_cluster
+      command: eksctl create cluster -f cluster.yaml
+      purpose: "Provision EKS cluster (control plane + node group)"
+
+    - step: verify_nodes
+      command: kubectl get nodes
+      purpose: "Confirm worker nodes are ready"
+
+  namespaces:
+    - step: create_namespaces
+      command: |
+        kubectl create ns monitoring
+        kubectl create ns app
+      purpose: "Isolate monitoring stack and application workloads"
+
+  application_deploy:
+    - step: build_image
+      command: docker build -t bhavukm/springboot-demo:latest .
+      purpose: "Build Spring Boot container image"
+
+    - step: push_image
+      command: docker push bhavukm/springboot-demo:latest
+      purpose: "Push image to Docker Hub for EKS to pull"
+
+    - step: deploy_app
+      command: kubectl apply -f springboot-deployment.yaml
+      purpose: "Deploy Spring Boot pods in Kubernetes"
+
+    - step: expose_service
+      command: kubectl apply -f springboot-service.yaml
+      purpose: "Expose app internally via ClusterIP service"
+
+    - step: verify_app
+      command: |
+        kubectl get pods -n app
+        kubectl get svc -n app
+      purpose: "Ensure app and service are running"
+
+  prometheus_stack:
+    - step: add_helm_repo
+      command: helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+      purpose: "Add Prometheus Helm repository"
+
+    - step: update_repo
+      command: helm repo update
+      purpose: "Fetch latest charts"
+
+    - step: install_stack
+      command: |
+        helm install prometheus prometheus-community/kube-prometheus-stack \
+          -n monitoring --create-namespace
+      purpose: "Deploy Prometheus, Grafana, Alertmanager, Operator"
+
+    - step: verify_monitoring
+      command: kubectl get pods -n monitoring
+      purpose: "Ensure monitoring components are running"
+
+  service_monitor:
+    - step: create_servicemonitor
+      command: kubectl apply -f servicemonitor.yaml
+      purpose: "Tell Prometheus how to discover and scrape Spring Boot metrics"
+
+    - step: verify_targets
+      command: |
+        kubectl port-forward -n monitoring svc/prometheus-kube-prometheus-prometheus 9090
+      purpose: "Access Prometheus UI to verify scrape targets"
+
+  grafana_access:
+    - step: port_forward_grafana
+      command: kubectl port-forward -n monitoring svc/prometheus-grafana 3000:80
+      purpose: "Access Grafana UI locally"
+
+    - step: get_admin_password
+      command: |
+        kubectl get secret -n monitoring prometheus-grafana \
+        -o jsonpath="{.data.admin-password}" | base64 --decode
+      purpose: "Retrieve Grafana login password"
+
+  metrics_validation:
+    - step: test_metrics_endpoint
+      command: |
+        kubectl run test --rm -it --image=curlimages/curl -n app -- sh
+      purpose: "Run debug pod to test service connectivity"
+
+    - step: curl_metrics
+      command: curl http://springboot-service.app.svc.cluster.local/actuator/prometheus
+      purpose: "Verify application exposes Prometheus metrics"
+
+    - step: grafana_explore_queries
+      queries:
+        - jvm_memory_used_bytes
+        - process_cpu_usage
+        - http_server_requests_seconds_count
+      purpose: "Confirm metrics are visible in Grafana"
+
+  dashboards:
+    - step: create_dashboard
+      action: "Grafana UI → Dashboards → New"
+      purpose: "Visualize JVM, CPU, latency, traffic metrics"
+
+    - step: sample_queries
+      queries:
+        heap_usage: |
+          sum(jvm_memory_used_bytes{area="heap"}) /
+          sum(jvm_memory_max_bytes{area="heap"})
+        request_rate: rate(http_server_requests_seconds_count[1m])
+        latency_p95: |
+          histogram_quantile(0.95,
+            sum(rate(http_server_requests_seconds_bucket[5m])) by (le))
+      purpose: "Build production-grade panels"
+
+  alerting_rules:
+    - step: create_alert_rule
+      action: "Grafana UI → Alerting → New Alert Rule"
+      query: |
+        sum(jvm_memory_used_bytes{area="heap"}) /
+        sum(jvm_memory_max_bytes{area="heap"})
+      condition: "WHEN above 0.8 FOR 2m"
+      purpose: "Trigger alert on high heap usage"
+
+  slack_setup:
+    - step: create_slack_app
+      action: "https://api.slack.com/apps → Create App"
+      purpose: "Create Slack integration app"
+
+    - step: enable_webhook
+      action: "Enable Incoming Webhooks"
+      purpose: "Allow external systems (Grafana) to send messages"
+
+    - step: create_webhook
+      action: "Add New Webhook → Select channel"
+      output: "https://hooks.slack.com/services/XXX"
+      purpose: "Generate webhook URL for Grafana"
+
+  grafana_contact_point:
+    - step: create_contact_point
+      action: "Grafana → Alerting → Contact Points → New"
+      config:
+        type: webhook
+        url: "<SLACK_WEBHOOK_URL>"
+        send_resolved: true
+      purpose: "Configure Slack as alert destination"
+
+  notification_policy:
+    - step: configure_policy
+      action: "Grafana → Alerting → Notification Policies"
+      match:
+        severity: critical
+      route_to: "Slack Alerts"
+      purpose: "Route critical alerts to Slack"
+
+  alert_testing:
+    - step: generate_load
+      command: |
+        kubectl run load-generator \
+          --image=curlimages/curl -n app --rm -it -- sh
+      purpose: "Create load inside cluster"
+
+    - step: trigger_memory_alert
+      command: |
+        while true; do curl http://springboot-service/leak; done
+      purpose: "Simulate memory pressure to trigger alert"
+
+    - step: verify_alert
+      action: "Grafana → Alerting → Active Alerts"
+      purpose: "Confirm alert is firing"
+
+    - step: verify_slack
+      action: "Check Slack channel"
+      purpose: "Confirm alert delivery"
+
+  final_outcome:
+    - "EKS cluster running application"
+    - "Prometheus scraping metrics"
+    - "Grafana dashboards visualizing data"
+    - "Alerts configured and firing"
+    - "Slack receiving real-time notifications"

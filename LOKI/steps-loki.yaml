@@ -1,0 +1,192 @@
+project: EKS Observability - Loki Logging Setup
+
+overview:
+  description: >
+    This document captures the end-to-end setup of Grafana Loki for log aggregation
+    in an AWS EKS cluster, including Promtail deployment, troubleshooting steps,
+    and final working architecture.
+
+# ---------------------------------------------------
+# FINAL ARCHITECTURE
+# ---------------------------------------------------
+
+architecture:
+  flow: |
+    Spring Boot App (Pods)
+          ↓
+    Node filesystem (/var/log/pods)
+          ↓
+    Promtail (DaemonSet on each node)
+          ↓
+    Loki (log aggregation backend)
+          ↓
+    Grafana (visualization + alerting)
+
+  explanation: >
+    Promtail runs on each node and reads container logs directly from the host.
+    It enriches logs with Kubernetes metadata and pushes them to Loki.
+    Grafana queries Loki to visualize logs.    
+
+# ---------------------------------------------------
+# STEP 1 — INSTALL LOKI (Single Binary - Lightweight)
+# ---------------------------------------------------
+
+step_1_install_loki:
+  command: |
+    helm install loki grafana/loki -n monitoring \
+      --set deploymentMode=SingleBinary \
+      --set loki.auth_enabled=false \
+      --set loki.commonConfig.replication_factor=1 \
+      --set loki.storage.type=filesystem \
+      --set loki.useTestSchema=true \
+      --set singleBinary.replicas=1 \
+      --set singleBinary.persistence.enabled=false \
+      --set backend.replicas=0 \
+      --set read.replicas=0 \
+      --set write.replicas=0 \
+      --set chunksCache.enabled=false \
+      --set resultsCache.enabled=false \
+      --set loki.resources.requests.cpu=50m \
+      --set loki.resources.requests.memory=128Mi \
+      --set loki.resources.limits.memory=256Mi
+
+  purpose: >
+    Deploy Loki in lightweight mode suitable for learning/testing.
+    Avoids distributed complexity and removes dependency on object storage.
+
+# ---------------------------------------------------
+# STEP 2 — VERIFY LOKI
+# ---------------------------------------------------
+
+step_2_verify_loki:
+  command: |
+    kubectl port-forward svc/loki-gateway -n monitoring 3100:80
+
+  test: |
+    curl http://localhost:3100/loki/api/v1/status/buildinfo
+
+  purpose: >
+    Ensures Loki is up and accepting requests.
+
+# ---------------------------------------------------
+# STEP 3 — INSTALL PROMTAIL (CORRECT WAY)
+# ---------------------------------------------------
+
+step_3_install_promtail:
+  command: |
+    helm install promtail grafana/promtail -n monitoring \
+      --set daemonset.enabled=true \
+      --set deployment.enabled=false \
+      --set "config.clients[0].url=http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push" \
+      --set tolerations[0].operator=Exists \
+      --set resources.requests.cpu=10m \
+      --set resources.requests.memory=32Mi \
+      --set resources.limits.cpu=50m \
+      --set resources.limits.memory=64Mi \
+      --set config.positions.filename=/tmp/positions.yaml \
+      --set volumes[0].name=varlog \
+      --set volumes[0].hostPath.path=/var/log \
+      --set volumeMounts[0].name=varlog \
+      --set volumeMounts[0].mountPath=/var/log \
+      --set volumes[1].name=containers \
+      --set volumes[1].hostPath.path=/var/log/containers \
+      --set volumeMounts[1].name=containers \
+      --set volumeMounts[1].mountPath=/var/log/containers
+
+  purpose: >
+    Deploy Promtail as a DaemonSet so it runs on every node.
+    Mounts host log directories to access Kubernetes pod logs.
+
+# ---------------------------------------------------
+# STEP 4 — VERIFY LOG COLLECTION
+# ---------------------------------------------------
+
+step_4_verify_promtail:
+  command: |
+    kubectl logs -n monitoring daemonset/promtail | grep springboot
+
+  expected: >
+    Promtail should show "Adding target" for springboot logs.
+
+  purpose: >
+    Confirms Promtail is discovering and tailing application logs.
+
+# ---------------------------------------------------
+# STEP 5 — ADD LOKI DATA SOURCE IN GRAFANA
+# ---------------------------------------------------
+
+step_5_grafana_datasource:
+  url: http://loki-gateway.monitoring.svc.cluster.local/
+  type: Loki
+
+  purpose: >
+    Connect Grafana to Loki for log visualization.
+
+# ---------------------------------------------------
+# STEP 6 — QUERY LOGS
+# ---------------------------------------------------
+
+step_6_query_logs:
+  queries:
+    - '{namespace="app"}'
+    - '{pod=~"springboot.*"}'
+    - '{container="springboot"}'
+
+  note: >
+    Always ensure correct labels and time range (Last 5m / 1h).
+
+# ---------------------------------------------------
+# ISSUES FACED + ROOT CAUSE + FIX
+# ---------------------------------------------------
+
+issues:
+
+  - issue: Loki pods stuck in Pending
+    root_cause: PVC / storage misconfiguration
+    fix: Disabled persistence and used filesystem storage
+
+  - issue: Promtail pods Pending
+    root_cause: insufficient node resources
+    fix: scaled nodegroup or reduced resource requests
+
+  - issue: No logs in Grafana (initial)
+    root_cause: Promtail deployed as Deployment (not DaemonSet)
+    fix: switched to DaemonSet
+
+  - issue: Still no logs
+    root_cause: missing hostPath mounts
+    fix: mounted /var/log and /var/log/containers
+
+  - issue: Promtail not discovering app namespace
+    root_cause: incorrect scraping scope
+    fix: ensured full Kubernetes discovery
+
+  - issue: Logs visible in Promtail but not Grafana
+    root_cause: wrong LogQL labels
+    fix: used correct labels (namespace, container, job)
+
+  - issue: Logs rejected by Loki
+    error: "entry too far behind"
+    root_cause: logs older than Loki ingestion window
+    fix: restarted application to generate fresh logs
+
+# ---------------------------------------------------
+# FINAL STATE
+# ---------------------------------------------------
+
+final_state:
+  loki: running
+  promtail: running (DaemonSet)
+  grafana: connected
+  logs: visible
+  pipeline: healthy
+
+# ---------------------------------------------------
+# SRE TAKEAWAY
+# ---------------------------------------------------
+
+sre_learning:
+  - Logs require node-level collection (DaemonSet)
+  - Loki enforces ingestion time windows
+  - Label correctness is critical for querying
+  - Observability debugging = pipeline tracing (source → agent → backend → UI)

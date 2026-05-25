@@ -1,0 +1,64 @@
+## Quick Facts
+
+Uptime** – How long the JVM process has been running. In your case, `9.2 mins`.
+The JVM (Java Virtual Machine) is the runtime engine that allows Java (and other JVM-based languages like Kotlin, Scala, Groovy)
+to run on any system.
+Heap memory is the part of the JVM memory where Java objects are created at runtime. Stores objects, Spring beans, runtime data. Controlled via:
+- `-Xms` (initial heap size)
+- `-Xmx` (maximum heap size)
+Heap memory is managed by Garbage Collection, which automatically removes unused objects.
+Start Time** – Exact time when the JVM process started.
+Heap Used** – Percentage of Java heap currently used (`2.22%`).
+Non-Heap Used** – Percentage of JVM non-heap memory (e.g., Metaspace, code cache) currently used (`4.07%`).
+
+## IO Overview
+Rate (I/O ops/sec)** – Throughput of I/O requests (requests per second).
+Errors** – Number of failed I/O operations (no data here means no errors).
+Duration** – Average response time of requests.
+Utilization** – CPU utilization from I/O perspective (no data in your screenshot).
+
+## JVM Memory
+JVM Heap** – Tracks heap memory usage, committed, and max.
+
+Heap = runtime data area** where objects are allocated.
+JVM Non-Heap** – Tracks non-heap memory (e.g., class metadata, code cache).
+JVM Total** – Sum of heap + non-heap used/committed memory.
+JVM Process Memory** – Physical memory (RSS) consumed by the JVM process (empty in your screenshot).
+
+## JVM Misc
+
+CPU Usage** – Percent of CPU used by the JVM process.
+Load** – System load average on the node.
+Threads** – Number of JVM threads (live, peak).
+Thread States** – Distribution of threads in different states (RUNNABLE, WAITING, TIMED\_WAITING, BLOCKED).
+GC Pressure** – Garbage collection (GC) overhead as a percentage of total CPU time.4
+Garbage Collector (GC) manages heap memory automatically by removing unused objects.
+Log Events** – Rate of log events being emitted.
+File Descriptors** – Open file handles (JVM sockets, files). Compared with OS limits.
+
+## JVM Memory Pools (Heap)
+These correspond to specific regions in the Java heap (esp. for **G1 GC**):
+
+G1 Eden Space** – Newly allocated objects. GC moves surviving objects to Survivor or Old space.
+G1 Old Gen** – Long-lived objects (survivors promoted here).
+G1 Survivor Space** – Stores objects that survived one or more minor GCs.
+
+## JVM Memory Pools (Non-Heap)
+Metaspace** – Stores class metadata (in Java 8+, replaced PermGen).
+Compressed Class Space** – Stores class definitions in compressed form (reduces memory footprint).
+Code Cache (non-profiled methods)** – Stores JIT-compiled bytecode for non-profiled methods.
+Code Cache (profiled methods)** – Stores JIT-compiled bytecode for profiled methods.
+Code Cache (non-nmethods)** – Stores internal JVM code stubs, adapters.
+
+### Why these metrics matter for Spring Boot apps
+Heap & GC** – Monitor memory leaks, GC pressure, OutOfMemory risks.
+CPU Usage** – High CPU usage might indicate inefficient code, blocking I/O, or heavy GC.
+Threads** – Growing thread count can point to thread leaks or blocking calls.
+Metaspace** – Useful for detecting classloader leaks (common in redeployed apps).
+Log Events** – Helps correlate spikes in errors with performance drops.
+File Descriptors** – Running out leads to `Too many open files` errors.
+
+In short:
+Top section (Quick Facts)** → uptime & memory summary.
+Middle section (JVM Memory & Misc)** → resource consumption (CPU, memory, threads, GC).
+Bottom section (Pools)** → detailed JVM internals (heap regions, metaspace, JIT caches).

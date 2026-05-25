@@ -1,0 +1,151 @@
+# ============================================================
+#  SESSION SUMMARY — Observability EKS Practice
+#  Last practiced: May 19-20, 2026
+#  Written for: Next session continuity
+# ============================================================
+
+cluster:
+  name: obs-practice
+  region: ap-south-1
+  file: cluster-new.yaml
+  nodes: 2x t3.medium (managed node group: obs-ng)
+  spin_up_command: |
+    bash setup.sh
+  # setup.sh does everything end to end:
+  # Step 1: eksctl create cluster -f cluster-new.yaml
+  # Step 2: Install kube-prometheus-stack (Prometheus + Grafana)
+  # Step 3: Install Loki (SingleBinary, filesystem)
+  # Step 4: Install Tempo (minimal)
+  # Step 5: Deploy OTEL Agent (DaemonSet) + Gateway
+  # Step 6: Deploy Spring Boot App
+  # Step 7: Prints Grafana + Prometheus + App URLs
+
+namespaces:
+  - monitoring   # Prometheus, Grafana, Loki, Tempo
+  - observability  # OTEL Agent, OTEL Gateway
+  - app          # Spring Boot application
+
+# ============================================================
+#  STACK OVERVIEW
+# ============================================================
+
+stack:
+  metrics:
+    tools: Prometheus + Grafana
+    flow: Spring Boot /actuator/prometheus → OTEL Agent (DaemonSet) → OTEL Gateway → Prometheus → Grafana
+    servicemonitor: servicemonitor.yaml
+    slo_rules: springboot-slo-rules.yaml  # 99.9% SLO target
+    dashboards:
+      - Springboot_User_Experience        # Request Rate, Error Rate, P95 Latency, Active Requests
+      - Springboot_JVM_&_Application_Health  # Heap Usage, GC Pause, CPU, Thread Usage
+      - Springboot_Resource_&_Stability   # Uptime, File Descriptors, System Load, Thread Usage
+    dashboard_json_files:
+      - Springboot_User_Experience-1775208144643.json
+      - Springboot_JVM_&_Application_Health-1775208091650.json
+      - Springboot_Resource_&_Stability-1775208127698.json
+    grafana_login: admin / admin123
+
+  logs:
+    tools: Loki + Promtail + Grafana
+    flow: Pod logs (/var/log/pods) → Promtail (DaemonSet) → Loki → Grafana
+    config_file: loki-values.yaml
+    steps_file: LOKI/steps-loki.yaml
+    install_promtail: |
+      helm install promtail grafana/promtail -n monitoring \
+        --set daemonset.enabled=true \
+        --set deployment.enabled=false \
+        --set "config.clients[0].url=http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push" \
+        --set tolerations[0].operator=Exists \
+        --set resources.requests.cpu=10m \
+        --set resources.requests.memory=32Mi \
+        --set resources.limits.cpu=50m \
+        --set resources.limits.memory=64Mi \
+        --set config.positions.filename=/tmp/positions.yaml \
+        --set volumes[0].name=varlog \
+        --set volumes[0].hostPath.path=/var/log \
+        --set volumeMounts[0].name=varlog \
+        --set volumeMounts[0].mountPath=/var/log \
+        --set volumes[1].name=containers \
+        --set volumes[1].hostPath.path=/var/log/containers \
+        --set volumeMounts[1].name=containers \
+        --set volumeMounts[1].mountPath=/var/log/containers
+    grafana_datasource: http://loki-gateway.monitoring.svc.cluster.local/
+    useful_logql:
+      - '{namespace="app"}'
+      - '{pod=~"springboot.*"}'
+      - '{container="springboot"}'
+    issues_we_fixed:
+      - Promtail must be DaemonSet (not Deployment)
+      - Must mount /var/log and /var/log/containers as hostPath
+      - "entry too far behind" = restart app to generate fresh logs
+
+  traces:
+    tools: Grafana Tempo + OpenTelemetry Java Agent + Grafana
+    flow: Spring Boot (OTEL Java Agent) → OTLP HTTP 4318 → Tempo → Grafana
+    config_file: Tempo/tempo-minimal.yaml
+    steps_file: Tempo/Distributed Tracing Concepts and Steps.yaml
+    grafana_datasource: http://tempo.monitoring.svc.cluster.local:3100
+    traceql_query: '{resource.service.name="springboot-app"}'
+    springboot_env_vars:
+      JAVA_TOOL_OPTIONS: -javaagent:/otel/opentelemetry-javaagent.jar
+      OTEL_SERVICE_NAME: springboot-app
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo.monitoring.svc.cluster.local:4318
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+
+# ============================================================
+#  WHAT WE PRACTICED (Real Incident Scenarios)
+# ============================================================
+
+incidents_practiced:
+  - name: High Latency Debug
+    how: P95 Latency spike on User Experience dashboard → trace in Tempo → found slow span
+    tools_used: [Grafana, Tempo, TraceQL]
+
+  - name: Error Rate Spike
+    how: Error Rate (5xx) panel → Loki logs for exact exception → fix
+    tools_used: [Grafana, Prometheus, Loki]
+
+  - name: JVM Memory Leak
+    how: Heap Usage % climbing on JVM dashboard → GC Pause increasing → OOM risk
+    tools_used: [Grafana, Prometheus]
+
+  - name: SLO Burn Rate Alert
+    how: job:springboot_burn_rate:5m crossing threshold → SLO at risk
+    tools_used: [Prometheus, PrometheusRule]
+
+  - name: Promtail Not Collecting Logs
+    how: No logs in Grafana → checked Promtail pods → was Deployment not DaemonSet → fixed
+    tools_used: [Loki, Promtail, kubectl]
+
+# ============================================================
+#  QUICK VERIFY COMMANDS (after spin up)
+# ============================================================
+
+verify_after_spinup:
+  all_pods:       kubectl get pods -n monitoring && kubectl get pods -n observability && kubectl get pods -n app
+  grafana_url:    kubectl get svc kube-prometheus-stack-grafana -n monitoring
+  loki_test:      kubectl port-forward svc/loki-gateway -n monitoring 3100:80 && curl http://localhost:3100/loki/api/v1/status/buildinfo
+  otel_metrics:   kubectl port-forward svc/otel-gateway 8889:8889 -n observability && curl http://localhost:8889/metrics
+  app_metrics:    kubectl port-forward svc/springboot-service -n app 8090:80 && curl http://localhost:8090/actuator/prometheus
+  generate_traffic: for i in {1..20}; do curl http://localhost:8090; done
+
+grafana_datasources_to_add_manually:
+  - name: Loki
+    url: http://loki-gateway.monitoring.svc.cluster.local/
+  - name: Tempo
+    url: http://tempo.monitoring.svc.cluster.local:3100
+
+grafana_dashboards_import:
+  - Springboot_User_Experience-1775208144643.json
+  - Springboot_JVM_&_Application_Health-1775208091650.json
+  - Springboot_Resource_&_Stability-1775208127698.json
+
+# ============================================================
+#  DESTROY COMMAND (used at end of session)
+# ============================================================
+
+destroy:
+  command: eksctl delete cluster --name obs-practice --region ap-south-1
+  note: Deletes cluster, nodes, load balancers, and all AWS resources. Safe to run.

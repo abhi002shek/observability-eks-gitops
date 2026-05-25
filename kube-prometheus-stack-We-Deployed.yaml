@@ -1,0 +1,145 @@
+observability_stack_summary:
+  namespace: monitoring
+
+  overview:
+    description: >
+      kube-prometheus-stack deployed a full observability pipeline including
+      metrics collection, storage, visualization, and alerting for Kubernetes workloads.
+
+  core_components:
+
+    prometheus:
+      resource:
+        kind: StatefulSet
+        name: prometheus-prometheus-kube-prometheus-prometheus
+      purpose: >
+        Central metrics collection and storage system.
+        Scrapes metrics from applications, Kubernetes components, and exporters.
+      exposes:
+        - service: prometheus-kube-prometheus-prometheus
+        - port: 9090
+      role_in_observability: "Metrics storage + query engine (PromQL)"
+
+    grafana:
+      resource:
+        kind: Deployment
+        name: prometheus-grafana
+      purpose: >
+        Visualization layer for metrics stored in Prometheus.
+        Used to create dashboards and alerts.
+      exposes:
+        - service: prometheus-grafana
+        - port: 80
+      role_in_observability: "Dashboards + Alerting UI"
+
+    alertmanager:
+      resource:
+        kind: StatefulSet
+        name: alertmanager-prometheus-kube-prometheus-alertmanager
+      purpose: >
+        Handles alert routing, grouping, deduplication, and notifications
+        (Slack, email, etc.).
+      exposes:
+        - service: prometheus-kube-prometheus-alertmanager
+        - port: 9093
+      role_in_observability: "Alert routing and notification system"
+
+    prometheus_operator:
+      resource:
+        kind: Deployment
+        name: prometheus-kube-prometheus-operator
+      purpose: >
+        Manages Prometheus via CRDs like ServiceMonitor, PodMonitor,
+        and PrometheusRule. Dynamically updates scrape configs.
+      role_in_observability: "Automation + dynamic configuration"
+
+  metrics_sources:
+
+    node_exporter:
+      resource:
+        kind: DaemonSet
+        name: prometheus-prometheus-node-exporter
+      purpose: >
+        Collects node-level metrics (CPU, memory, disk, network)
+        from every Kubernetes node.
+      role_in_observability: "Infrastructure metrics"
+
+    kube_state_metrics:
+      resource:
+        kind: Deployment
+        name: prometheus-kube-state-metrics
+      purpose: >
+        Exposes Kubernetes object state (pods, deployments, replicas,
+        restarts, etc.).
+      role_in_observability: "Cluster state metrics"
+
+    application_metrics:
+      source: "Spring Boot app (/actuator/prometheus)"
+      discovery: "ServiceMonitor"
+      purpose: >
+        Exposes JVM and HTTP metrics via Micrometer.
+      role_in_observability: "Application-level metrics"
+
+  services_layer:
+
+    prometheus_services:
+      - prometheus-kube-prometheus-prometheus
+      - prometheus-operated
+      purpose: "Expose Prometheus internally for scraping and querying"
+
+    grafana_service:
+      - prometheus-grafana
+      purpose: "Access Grafana UI"
+
+    alertmanager_service:
+      - prometheus-kube-prometheus-alertmanager
+      purpose: "Expose alert routing endpoint"
+
+    exporters_service:
+      - prometheus-prometheus-node-exporter
+      - prometheus-kube-state-metrics
+      purpose: "Expose metrics endpoints for Prometheus scraping"
+
+  data_flow:
+
+    pipeline: >
+      Application / Node / Kubernetes Metrics →
+      Prometheus (scraping + storage) →
+      Grafana (dashboards + queries) →
+      Alertmanager (alert routing) →
+      Slack / Email
+
+  observability_pillars_mapping:
+
+    metrics:
+      components:
+        - prometheus
+        - node_exporter
+        - kube_state_metrics
+        - springboot_app
+      description: "Numerical time-series data for system health and performance"
+
+    logs:
+      status: "Not implemented (would require Loki)"
+    
+    traces:
+      status: "Not implemented (would require Tempo/OTEL)"
+
+  key_takeaways:
+    - "Prometheus scrapes and stores all metrics"
+    - "Grafana visualizes metrics and evaluates alerts"
+    - "Alertmanager routes alerts to external systems"
+    - "Operator automates configuration using CRDs"
+    - "Node exporter + kube-state-metrics provide infra + cluster visibility"
+    - "ServiceMonitor enables application-level scraping"
+
+  current_limitations:
+    - "No logs (Loki not deployed)"
+    - "No traces (Tempo/OTEL not deployed)"
+    - "Single-cluster scope (no long-term storage like Mimir/Thanos)"
+
+  production_extensions:
+    - "Add Loki for logs"
+    - "Add Tempo for traces"
+    - "Use Mimir/Thanos for scalable metrics storage"
+    - "Configure Alertmanager routing policies"

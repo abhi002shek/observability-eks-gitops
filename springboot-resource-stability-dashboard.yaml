@@ -1,0 +1,142 @@
+This part of the dashboard focuses on JVM and system-level health.
+Uptime helps detect restarts, file descriptors indicate resource usage and possible leaks, system load shows CPU pressure, and thread count reflects concurrency.
+I correlate these with latency and error metrics to identify whether issues are due to CPU saturation, thread exhaustion, or resource leaks.
+
+dashboard_panels:
+
+  uptime:
+    panel_name: "Uptime"
+    description: >
+      Represents the total time (in seconds) since the application process started.
+      It indicates application restarts and overall stability.
+
+    metric_source: "process_uptime_seconds"
+
+    promql: |
+      process_uptime_seconds
+
+    sre_interpretation:
+      normal_behavior:
+        - Continuously increasing line
+      abnormal_behavior:
+        - Sudden drop to near zero → application restart
+        - Frequent resets → crash loops or instability
+
+    sre_use_cases:
+      - Detecting pod restarts
+      - Verifying deployment rollouts
+      - Identifying crash loops
+
+    interview_line: >
+      “Uptime helps me quickly detect restarts. If I see frequent drops,
+      I correlate with logs and Kubernetes events to identify instability.”
+
+  file_descriptors:
+    panel_name: "File Descriptors"
+    description: >
+      Tracks the number of open file descriptors used by the JVM process.
+      Includes files, sockets, network connections, etc.
+
+    metric_source: "process_files_open_files"
+
+    promql: |
+      process_files_open_files
+
+    sre_interpretation:
+      normal_behavior:
+        - Stable or slightly fluctuating values
+      abnormal_behavior:
+        - Continuous increase → potential resource leak
+        - Near system limit → risk of application failure
+
+    sre_use_cases:
+      - Detecting socket leaks
+      - Monitoring connection exhaustion
+      - Preventing "Too many open files" errors
+
+    interview_line: >
+      “File descriptors represent system-level resources like sockets.
+      A steady increase usually indicates a leak, especially in DB or HTTP connections.”
+
+    alerting_hint:
+      threshold: "80% of ulimit"
+      action: "Investigate connection pooling and resource cleanup"
+
+  system_load:
+    panel_name: "System Load"
+    description: >
+      Represents the system load average over 1 minute.
+      Indicates how many processes are waiting for CPU.
+
+    metric_source: "system_load_average_1m"
+
+    promql: |
+      system_load_average_1m
+
+    sre_interpretation:
+      normal_behavior:
+        - Load roughly proportional to CPU cores
+      abnormal_behavior:
+        - Load > CPU cores → CPU contention
+        - Sudden spikes → traffic surge or inefficient processing
+
+    sre_use_cases:
+      - CPU saturation detection
+      - Performance bottleneck identification
+      - Capacity planning
+
+    interview_line: >
+      “System load tells me how busy the CPU is. If load exceeds the number of cores,
+      it indicates CPU contention and potential performance degradation.”
+
+    eks_context:
+      note: >
+        In Kubernetes, high load may not always mean node issue.
+        It should be correlated with container CPU limits and throttling.
+
+  thread_usage:
+    panel_name: "Thread Usage"
+    description: >
+      Shows the number of live JVM threads in the application.
+      Reflects concurrency and thread pool usage.
+
+    metric_source: "jvm_threads_live_threads"
+
+    promql: |
+      jvm_threads_live_threads
+
+    sre_interpretation:
+      normal_behavior:
+        - Stable thread count
+      abnormal_behavior:
+        - Gradual increase → thread leak
+        - Sudden spike → traffic burst or blocking operations
+        - Very high count → risk of OOM or CPU overhead
+
+    sre_use_cases:
+      - Detecting thread leaks
+      - Monitoring thread pool health
+      - Identifying blocking operations
+
+    interview_line: >
+      “Thread count indicates how much concurrency the application is handling.
+      A steady increase without dropping usually points to a thread leak.”
+
+    correlation_signals:
+      - High threads + high latency → thread pool saturation
+      - High threads + low CPU → blocking IO issue
+      - High threads + high CPU → inefficient processing
+
+  correlation_analysis:
+
+    how_to_read_together:
+      - Uptime drop + error spike → application crash
+      - File descriptors increasing + latency → connection leak
+      - High system load + high latency → CPU bottleneck
+      - Increasing threads + latency → thread pool exhaustion
+
+    sre_interview_summary: >
+      “These metrics help me understand JVM and OS-level health.
+      Uptime detects restarts, file descriptors track resource leaks,
+      system load shows CPU pressure, and thread usage reflects concurrency.
+      Together, they help identify saturation and stability issues.”

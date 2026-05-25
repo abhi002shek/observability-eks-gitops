@@ -1,0 +1,203 @@
+kube-prometheus-stack:
+  description: >
+    Production-grade Kubernetes monitoring stack deployed via Helm.
+    Provides metrics, alerting, and visualization out of the box.
+
+  core_components:
+
+    prometheus:
+      enabled: true
+      role: "Metrics collection and storage (TSDB)"
+      features:
+        - Scrapes Kubernetes components
+        - Stores time-series metrics (PVC-backed)
+        - Auto-discovers targets via ServiceMonitor/PodMonitor
+        - Preconfigured scrape jobs
+
+    prometheus_operator:
+      enabled: true
+      role: "Manages Prometheus via CRDs"
+      crds:
+        - ServiceMonitor
+        - PodMonitor
+        - Prometheus
+        - Alertmanager
+        - PrometheusRule
+      capabilities:
+        - Dynamic config generation
+        - Auto reload Prometheus
+        - Kubernetes-native monitoring
+
+    grafana:
+      enabled: true
+      role: "Visualization layer"
+      default:
+        datasource: "Prometheus (auto-configured)"
+        dashboards:
+          - Kubernetes Cluster Overview
+          - Node Exporter Full
+          - Pod Metrics
+          - Namespace Resource Usage
+          - API Server Metrics
+          - etcd (if available)
+      access:
+        admin_user: "admin"
+        admin_password: "auto-generated"
+
+    alertmanager:
+      enabled: true
+      role: "Alert routing and notification engine"
+      integrations:
+        - Email
+        - Slack
+        - PagerDuty
+        - Webhooks
+      features:
+        - Alert grouping
+        - Deduplication
+        - Routing rules
+
+  monitoring_targets:
+
+    node_monitoring:
+      component: "node-exporter"
+      type: "DaemonSet"
+      metrics:
+        - CPU usage
+        - Memory usage
+        - Disk IO
+        - Filesystem
+        - Network
+
+    kubernetes_state:
+      component: "kube-state-metrics"
+      metrics:
+        - Deployments
+        - Pods
+        - StatefulSets
+        - Jobs
+        - HPA
+      purpose: "Desired vs actual state visibility"
+
+    kubelet_metrics:
+      endpoints:
+        - /metrics
+        - /metrics/cadvisor
+      provides:
+        - Container CPU/memory
+        - Pod resource usage
+        - Container runtime metrics
+
+    control_plane:
+      components:
+        kube_apiserver:
+          monitored: true
+        kube_controller_manager:
+          monitored: "partial (EKS limitation)"
+        kube_scheduler:
+          monitored: "partial (EKS limitation)"
+      note: >
+        In AWS EKS, control plane is managed by AWS.
+        Some components are not directly scrapeable.
+
+  alerting_rules:
+
+    infrastructure:
+      - NodeNotReady
+      - NodeDiskPressure
+      - NodeMemoryPressure
+
+    workloads:
+      - PodCrashLooping
+      - PodNotReady
+      - DeploymentReplicasMismatch
+
+    resource_usage:
+      - HighCPUUsage
+      - HighMemoryUsage
+
+    control_plane:
+      - APIServerLatencyHigh
+      - APIServerErrorRateHigh
+
+  dashboards:
+    source: "Preloaded via ConfigMaps"
+    categories:
+      - Cluster-level dashboards
+      - Node-level dashboards
+      - Pod-level dashboards
+      - Namespace usage dashboards
+
+  rbac:
+    configured: true
+    capabilities:
+      - Service discovery
+      - Metrics scraping
+      - Secure API access
+
+  storage:
+    prometheus:
+      type: "PersistentVolume"
+      purpose: "Metric retention"
+
+  eks_specific_notes:
+    limitations:
+      - Control plane components partially accessible
+      - Some metrics endpoints not exposed
+    adjustments:
+      - kubeControllerManager.enabled: false (optional)
+      - kubeScheduler.enabled: false (optional)
+
+  missing_capabilities:
+
+    logs:
+      included: false
+      tools_required:
+        - Loki
+        - FluentBit / Fluentd
+
+    tracing:
+      included: false
+      tools_required:
+        - OpenTelemetry Collector
+        - Jaeger / Tempo
+
+    long_term_storage:
+      included: false
+      tools_required:
+        - Thanos
+        - Cortex
+        - Mimir
+
+    blackbox_monitoring:
+      included: false
+      optional_component: "blackbox-exporter"
+
+  sre_extension_stack:
+
+    recommended_addons:
+      logs:
+        - Loki
+        - Promtail
+
+      tracing:
+        - OpenTelemetry
+        - Tempo
+
+      metrics_scaling:
+        - Thanos
+        - Mimir
+
+      slo_management:
+        - Sloth
+        - Pyrra
+
+  mental_model:
+    architecture: |
+      Prometheus (metrics brain)
+        + Node Exporter (infra metrics)
+        + kube-state-metrics (K8s state)
+        + Kubelet/cAdvisor (container metrics)
+        + Alertmanager (alerting)
+        + Grafana (visualization)
+        + Prometheus Operator (automation layer)

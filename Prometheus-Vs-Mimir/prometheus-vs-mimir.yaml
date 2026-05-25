@@ -1,0 +1,109 @@
+observability_comparison:
+
+  what_you_deployed:
+    stack: kube-prometheus-stack
+    components:
+      - Prometheus (metrics scraping + storage)
+      - Grafana (visualization + alerting)
+      - Alertmanager (alert routing)
+      - Prometheus Operator (CRD-based automation)
+      - Node Exporter (node metrics)
+      - Kube State Metrics (cluster state)
+    architecture:
+      type: single-cluster
+      storage: local (TSDB inside Prometheus pod)
+    strengths:
+      - "Easy to deploy via Helm"
+      - "Great for small to medium workloads"
+      - "Kubernetes-native (ServiceMonitor, PodMonitor)"
+      - "Fast queries for recent data"
+    limitations:
+      - "Limited scalability (single Prometheus instance)"
+      - "No long-term storage"
+      - "No horizontal scaling of metrics backend"
+      - "Not ideal for multi-cluster setups"
+
+  prometheus_mimir:
+    type: distributed_metrics_backend
+    purpose: >
+      Horizontally scalable, long-term storage system for Prometheus metrics.
+      Designed for large-scale, multi-cluster environments.
+    architecture:
+      type: distributed
+      components:
+        - distributor
+        - ingester
+        - querier
+        - compactor
+        - object storage (S3/MinIO)
+    strengths:
+      - "Massive scalability (billions of metrics)"
+      - "Long-term storage (months/years)"
+      - "Highly available (replication)"
+      - "Multi-cluster aggregation"
+    limitations:
+      - "Complex setup"
+      - "Higher resource requirements"
+      - "Needs object storage (S3/MinIO)"
+
+  key_differences:
+
+    architecture:
+      prometheus: "Monolithic (single binary TSDB)"
+      mimir: "Distributed microservices architecture"
+
+    scalability:
+      prometheus: "Vertical scaling only"
+      mimir: "Horizontal scaling (add more nodes)"
+
+    storage:
+      prometheus: "Local disk (ephemeral/limited retention)"
+      mimir: "Object storage (S3/MinIO, long-term)"
+
+    use_case:
+      prometheus: "Cluster-level monitoring"
+      mimir: "Enterprise-scale, multi-cluster observability"
+
+    reliability:
+      prometheus: "Single point of failure (unless HA configured)"
+      mimir: "Built-in replication and HA"
+
+  relationship_between_them:
+    explanation: >
+      Prometheus and Mimir are not competitors but complementary.
+      Prometheus scrapes metrics, while Mimir stores them at scale.
+
+    flow:
+      - "Prometheus scrapes metrics"
+      - "Prometheus remote_write → Mimir"
+      - "Grafana queries Mimir"
+
+  can_kube_prometheus_stack_deploy_mimir:
+    answer: "No (not directly)"
+
+    explanation: >
+      kube-prometheus-stack does NOT include Mimir.
+      It deploys Prometheus-based monitoring stack only.
+
+    correct_approach:
+      - "Deploy kube-prometheus-stack (for scraping + dashboards)"
+      - "Deploy Mimir separately (via grafana/mimir-distributed Helm chart)"
+      - "Configure Prometheus remote_write to Mimir"
+
+  recommended_architecture_progression:
+
+    beginner:
+      - "kube-prometheus-stack only"
+
+    intermediate:
+      - "kube-prometheus-stack + remote_write to Mimir"
+
+    advanced:
+      - "OTEL Collector → Mimir → Grafana (no direct Prometheus scraping)"
+
+  sre_interview_statement: >
+    kube-prometheus-stack provides a Kubernetes-native monitoring solution
+    using Prometheus for scraping and short-term storage.
+    For large-scale or long-term observability, Prometheus is extended with
+    systems like Mimir via remote_write, enabling horizontal scalability
+    and durable storage.

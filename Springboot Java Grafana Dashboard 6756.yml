@@ -1,0 +1,41 @@
+### 1. Uptime
+* Meaning: How long your Spring Boot application process has been running since it started.
+* Why important: Helps you know if your app restarted recently (possibly due to crashes, deployments, or pod evictions in Kubernetes).
+
+### 2. Start Time
+* Meaning: The exact timestamp when your Spring Boot application started.
+* Why important: Useful for troubleshooting unexpected restarts or verifying deployment times.
+
+### 3. Heap Used
+* Meaning: The amount of heap memory currently being used by the JVM.
+  * Heap = memory where objects are allocated.
+* Why important: Monitors for memory leaks, garbage collection efficiency, and if the app is nearing OutOfMemoryErrors.
+
+### 4. Non-Heap Used
+* Meaning: JVM memory outside the heap, used for things like:
+
+  * Metaspace (class metadata),
+  * Code cache (JIT-compiled methods),
+  * Thread stacks.
+* Why important: If non-heap memory grows unexpectedly, it may indicate classloader leaks or configuration issues.
+
+### 5. Process Open Files
+* Meaning: Number of file descriptors (open files, sockets, pipes) the application process is currently using.
+* Why important: Too many open files → may hit OS file descriptor limits (`ulimit -n`), causing failures in networking or file access.
+
+### 6. CPU Usage
+* Meaning: Percentage of CPU consumed by your Spring Boot process.
+* Why important: High sustained CPU usage may mean inefficient code, heavy load, or thread contention.
+
+### 7. Load Average
+* Meaning: System load over time (usually last 1, 5, 15 minutes).
+* Why important: Indicates how busy your machine/node is.
+  * A load value higher than available CPU cores = possible bottleneck.
+
+Why you are seeing N/A / No data in dashboard:
+* The dashboard panels are pre-configured, but your Prometheus setup may not be scraping metrics from the Spring Boot app.
+* You need to make sure:
+
+  1. Spring Boot app exposes Actuator + Micrometer metrics at `/actuator/prometheus`.
+  2. Prometheus `scrape_config` includes your app’s endpoint.
+  3. The correct datasource is selected in Grafana.

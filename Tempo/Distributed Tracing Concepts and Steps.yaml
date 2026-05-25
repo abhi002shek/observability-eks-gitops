@@ -1,0 +1,353 @@
+tracing_guide:
+
+  basics:
+    what_is_tracing: |
+      Distributed tracing is a technique used to track a request as it flows
+      through multiple services in a system. Each request is broken into smaller
+      units called spans, and all spans together form a trace.
+
+    key_terms:
+      trace: "Represents a complete request lifecycle"
+      span: "A single unit of work (e.g., HTTP call, DB query)"
+      trace_id: "Unique identifier for the entire request"
+      span_id: "Unique identifier for each operation"
+
+    why_tracing_matters: |
+      In modern distributed systems, a single request may go through multiple
+      services. Logs and metrics alone cannot show the full path. Tracing provides
+      end-to-end visibility.
+
+    how_it_helps:
+      - Identify latency bottlenecks
+      - Debug failures across services
+      - Understand request flow
+      - Improve performance optimization
+
+    production_scenario: |
+      A user reports that API requests are slow. Metrics show high latency,
+      but it’s unclear where the delay is. Using tracing, you identify that:
+      - 50ms in API layer
+      - 20ms in service layer
+      - 900ms in database query
+      Root cause: slow DB query. Without tracing, this would take much longer
+      to diagnose.
+
+  grafana_tempo:
+
+    what_is_tempo: |
+      Grafana Tempo is a distributed tracing backend designed to store and query
+      traces efficiently. Unlike traditional systems, it does not index traces,
+      making it highly cost-effective.
+
+  What is indexing: |
+      Think of indexing like the index page of a book.
+
+Without index → you read the whole book to find a topic
+With index → you jump directly to the page
+
+In Observability (like tracing/logs)
+
+When data (logs, traces) is stored:
+
+Without indexing → system scans all data to find what you need
+With indexing → system stores a “lookup table” to find data instantly
+
+Example
+
+Let’s say you have millions of traces.
+
+You search:
+service = springboot-app
+
+Without indexing:
+System checks every trace one by one
+
+With indexing:
+System directly jumps to matching traces
+
+Why Indexing Increases Cost?
+Indexing is NOT free.
+
+Extra Storage Cost
+
+Index = additional data
+Traces (raw data) + Index (lookup data)
+You store more data overall
+
+Higher Write Cost
+
+When a trace comes in:
+
+Store trace
+ALSO update index
+
+More CPU + memory + disk writes
+
+Higher Infrastructure Cost
+
+Indexes need:
+
+Fast storage (SSD)
+Memory for lookup
+Compute for maintaining index
+
+More expensive infrastructure
+
+Why Tempo is Different
+
+Grafana Tempo does:
+NO INDEXING
+
+What Tempo Does Instead?
+Uses trace ID for lookup
+
+One-Line Summary
+
+Indexing is a shortcut to find data faster, but it costs more storage, CPU, and money. Tempo avoids it to stay cheap and scalable.
+
+
+    key_characteristics:
+      - No indexing (low cost)
+      - Scales easily
+      - Works with OTLP (OpenTelemetry)
+      - Integrates with Grafana
+
+    architecture:
+      ingestion: "Receives traces via OTLP (4317 gRPC / 4318 HTTP)"
+      storage: "Stores traces in memory or object storage"
+      query: "Serves trace queries via HTTP API (3200)"
+      visualization: "Grafana UI queries Tempo to display traces"
+
+    components:
+      distributor: "Receives incoming spans"
+      ingester: "Buffers and stores traces"
+      querier: "Handles read queries"
+      compactor: "Optimizes storage (production setups)"
+      query_frontend: "Handles query load balancing"
+
+    minimal_mode_note: |
+      In our setup, we use monolithic mode (single binary), where all components
+      run inside one pod for simplicity.
+
+  our_architecture:
+
+    overview: |
+      We deployed a Spring Boot application on EKS and enabled distributed tracing
+      using OpenTelemetry Java Agent. Traces are sent directly to Grafana Tempo,
+      and visualized in Grafana.
+
+    workflow_diagram: |
+      User Request (curl)
+              ↓
+      Spring Boot App (Instrumented via OTEL Agent)
+              ↓
+      OTLP Export (HTTP 4318)
+              ↓
+      Grafana Tempo (Trace Storage)
+              ↓
+      Grafana (Visualization via 3200 API)
+
+    springboot_changes:
+
+      change_1_java_agent:
+        description: "Attach OpenTelemetry Java Agent"
+        config: "JAVA_TOOL_OPTIONS = -javaagent:/otel/opentelemetry-javaagent.jar"
+        reason: |
+          Automatically instruments the application without code changes.
+          Captures HTTP requests, DB calls, and more.
+
+      change_2_service_name:
+        config: "OTEL_SERVICE_NAME = springboot-app"
+        reason: |
+          Identifies the service in traces. Used for filtering and querying.
+
+      change_3_exporter_endpoint:
+        config: "OTEL_EXPORTER_OTLP_ENDPOINT = tempo service"
+        reason: |
+          Defines where traces are sent (Tempo ingestion endpoint).
+
+      change_4_traces_exporter:
+        config: "OTEL_TRACES_EXPORTER = otlp"
+        reason: |
+          Enables trace export using OTLP protocol.
+
+      change_5_disable_metrics_logs:
+        config:
+          - "OTEL_METRICS_EXPORTER = none"
+          - "OTEL_LOGS_EXPORTER = none"
+        reason: |
+          Tempo only supports traces. Disabling logs and metrics avoids errors
+          and unnecessary overhead.
+
+      change_6_init_container:
+        description: "Download OTEL agent dynamically"
+        reason: |
+          Keeps application image clean. Agent is injected at runtime.
+
+    components_in_workflow:
+
+      springboot_app:
+        role: "Generates traces"
+        how_it_helps: |
+          Captures request lifecycle automatically via OTEL agent.
+
+      otel_java_agent:
+        role: "Instrumentation layer"
+        how_it_helps: |
+          Intercepts HTTP calls and creates spans without modifying code.
+
+      otlp_protocol:
+        role: "Data transport"
+        how_it_helps: |
+          Standard protocol to send traces from app to backend.
+
+      grafana_tempo:
+        role: "Trace storage backend"
+        how_it_helps: |
+          Stores traces efficiently and allows querying.
+
+      grafana:
+        role: "Visualization layer"
+        how_it_helps: |
+          Displays traces, latency, and request breakdown for debugging.
+
+    end_to_end_flow: |
+      Request hits Spring Boot → OTEL agent creates spans → spans sent via OTLP
+      → Tempo stores traces → Grafana queries Tempo → user visualizes trace.
+
+  key_takeaways:
+    - Tracing gives end-to-end visibility of requests
+    - Tempo is optimized for cost and scalability
+    - OTEL Java Agent enables zero-code instrumentation
+    - Grafana provides powerful visualization
+    - Correct traffic routing is critical for trace generation
+
+  Step 1:
+    Deploy EKS Cluster: |
+      eksctl create cluster \
+        --name eks-clean \
+        --region us-east-1 \
+        --version 1.35 \
+        --node-type t3.small \
+        --nodes 2 \
+        --nodes-min 1 \
+        --nodes-max 2 \
+        --managed \
+        --ssh-access \
+        --ssh-public-key ssh
+    
+  Step 2: Create Namespaces: |
+    kubectl create namespace app
+    kubectl create namespace observability  
+
+  Step 3: Deploy Spring Boot App with OTEL Agent: |
+    kubectl apply -f springboot-deployment.yaml  
+
+  Step 4: Create Spring Boot Service: |
+    kubectl apply -f springboot-service.yaml
+
+  Step 5: Verify application is running: |
+    kubectl get pods -n app
+    kubectl get svc -n app
+
+  Step 6: Install Grafana Tempo: |
+    helm repo add grafana https://grafana.github.io/helm-charts
+    helm repo update
+    helm install tempo grafana/tempo \
+      -n observability \
+      -f tempo-minimal.yaml
+
+  Step 7: Verify Tempo is running: |
+    kubectl get pods -n observability
+    kubectl get svc -n observability
+
+  Step 8: Install Grafana: |
+    helm install grafana grafana/grafana \
+      -n observability \
+      --set adminPassword=admin \
+      --set resources.requests.memory=128Mi \
+      --set resources.limits.memory=256Mi
+
+  Step 9: Access Grafana UI: |
+    kubectl port-forward svc/grafana 3000:80 -n observability
+
+    Open http://localhost:3000 in browser
+    Login with admin/admin
+
+  Step 10: Configure Tempo Data Source in Grafana: |
+    In Grafana UI:
+    - Go to Configuration → Data Sources → Add data source
+    - Select "Tempo"
+    - Set URL to http://tempo.observability.svc.cluster.local:3200
+    - Save & Test             
+
+  Step 11: Generate Traffic: |
+    kubectl port-forward svc/springboot-service -n app 8090:80
+
+    # Generate traffic
+    for i in {1..20}; do curl http://localhost:8090; done
+
+  Step 12: Visualize Traces in Grafana: | 
+    In Grafana UI:
+    - Go to Explore
+    - Select Tempo data source
+    - Run query (TraceQL): {resource.service.name="springboot-app"}
+
+  Step 13: verify successful trace visualization: |
+    You should see:
+      - Trace IDs
+      - Service: springboot-app
+      - Endpoint: GET /
+      - Latency values
+
+  final_architecture: |
+    curl request
+        ↓
+    Spring Boot (OTEL Java Agent)
+        ↓
+    OTLP (HTTP 4318)
+        ↓
+    Grafana Tempo
+        ↓
+    Grafana UI (Explore → Tempo)
+
+
+Example trace visualization in Grafana:
+What You Are Looking At
+Trace ID: d4a914c900f21db756571ea0d907ffd5
+
+You opened a single trace in Grafana backed by Grafana Tempo.
+
+This trace represents: ONE user request → complete journey through the system
+
+High-Level View (Your Trace)
+
+From your screen:
+springboot-app: GET /   → 200 OK
+Duration: ~293 ms
+
+What this means?
+check grafana-trace-meaning.png
+
+What is a Trace (In Your Case)
+
+curl http://localhost:8090
+        ↓
+Spring Boot receives request
+        ↓
+OTEL agent creates span
+        ↓
+Tempo stores it
+        ↓
+Grafana shows it
+
+That entire flow = 1 trace
+
+span name: GET /
+service: springboot-app
+
+
+
+
+
+        

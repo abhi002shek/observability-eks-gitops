@@ -1,0 +1,165 @@
+I interpret this dashboard using the four golden signals—traffic, latency, errors, and saturation.
+Request rate shows load, P95 latency shows user experience, error rate shows reliability, and active requests indicate system pressure.
+By correlating these, I can quickly identify whether the issue is due to traffic surge, JVM behavior like GC, or downstream dependencies.
+
+dashboard_panels:
+
+  request_rate:
+    panel_name: "Request Rate (Traffic)"
+    description: >
+      Measures the number of incoming HTTP requests per second handled by the application.
+      It reflects system load and traffic patterns.
+
+    metric_source: "http_server_requests_seconds_count"
+
+    promql: |
+      sum(rate(http_server_requests_seconds_count[1m]))
+
+    sre_interpretation:
+      normal_behavior:
+        - Stable rate indicates consistent traffic
+        - Gradual increase → organic growth or scaling traffic
+      abnormal_behavior:
+        - Sudden spike → traffic surge or possible DDoS
+        - Sudden drop to zero → app crash, pod restart, or ingress issue
+
+    sre_use_cases:
+      - Capacity planning
+      - Autoscaling decisions (HPA input)
+      - Detecting traffic anomalies
+
+    interview_line: >
+      “Request rate tells me how much traffic the service is handling.
+      I correlate it with latency and errors to understand system health under load.”
+
+  error_rate:
+    panel_name: "Error Rate (5xx)"
+    description: >
+      Tracks the rate of server-side errors (HTTP 5xx responses).
+      Indicates application or dependency failures.
+
+    metric_source: "http_server_requests_seconds_count"
+
+    promql: |
+      sum(rate(http_server_requests_seconds_count{status=~"5.."}[1m]))
+
+    sre_interpretation:
+      normal_behavior:
+        - Near zero in healthy systems
+      abnormal_behavior:
+        - Sudden spike → application bug, DB failure, downstream service issue
+        - Sustained errors → outage scenario
+
+    sre_use_cases:
+      - Alerting (critical signal)
+      - Incident detection
+      - SLO error budget tracking
+
+    interview_line: >
+      “Error rate is a direct indicator of system reliability.
+      Any spike in 5xx errors is treated as a production incident.”
+
+  latency_p95:
+    panel_name: "Latency (P95)"
+    description: >
+      Measures the 95th percentile response time.
+      Indicates how slow the slowest 5% of requests are.
+
+    metric_source: "http_server_requests_seconds_bucket"
+
+    promql: |
+      histogram_quantile(0.95, rate(http_server_requests_seconds_bucket[5m]))
+
+    sre_interpretation:
+      normal_behavior:
+        - Stable low latency → healthy system
+      abnormal_behavior:
+        - Gradual increase → system under stress
+        - Sudden spikes → GC pause, DB latency, thread contention
+
+    sre_use_cases:
+      - SLO tracking (user experience)
+      - Detecting tail latency issues
+      - Performance degradation analysis
+
+    interview_line: >
+      “P95 latency reflects real user experience.
+      If it increases, I investigate GC, database latency, or thread pool saturation.”
+
+    common_issues_if_no_data:
+      - Micrometer histogram not enabled
+      - Missing:
+        management.metrics.distribution.percentiles-histogram.http.server.requests=true
+
+  active_requests:
+    panel_name: "Active Requests"
+    description: >
+      Represents the number of in-flight HTTP requests currently being processed.
+      Indicates concurrency level in the application.
+
+    metric_source: "http_server_requests_active_seconds"
+
+    promql: |
+      sum(http_server_requests_active_seconds_active_count)
+
+    sre_interpretation:
+      normal_behavior:
+        - Low and stable values
+      abnormal_behavior:
+        - Increasing trend → slow processing or backlog
+        - Sudden spikes → traffic burst or downstream slowness
+
+    sre_use_cases:
+      - Detecting thread pool saturation
+      - Identifying request queuing
+      - Early signal of latency increase
+
+    interview_line: >
+      “Active requests show how many requests are being processed at a given time.
+      If this increases continuously, it usually means requests are getting slower.”
+
+  correlation_analysis:
+
+    sre_gold_signals_mapping:
+      - request_rate → Traffic
+      - latency_p95 → Latency
+      - error_rate → Errors
+      - active_requests → Saturation (proxy signal)
+
+    how_to_read_together:
+      - High request rate + high latency → system under load
+      - High latency + low request rate → internal bottleneck (GC, DB)
+      - High error rate + stable traffic → application failure
+      - Increasing active requests → saturation building up
+
+    interview_line: >
+      “I never look at these metrics in isolation.
+      I correlate traffic, latency, errors, and saturation to identify root cause quickly.”
+
+  common_real_world_scenarios:
+
+    gc_issue:
+      symptoms:
+        - latency_p95 spikes
+        - request_rate stable
+        - cpu spikes
+      conclusion: "GC pause impacting response time"
+
+    database_slowdown:
+      symptoms:
+        - latency_p95 increases
+        - active_requests increases
+      conclusion: "DB queries slowing down"
+
+    pod_crash:
+      symptoms:
+        - request_rate drops to zero
+        - error_rate spikes before drop
+      conclusion: "Application crash or restart"
+
+    traffic_spike:
+      symptoms:
+        - request_rate spikes
+        - latency increases
+        - active_requests rises
+      conclusion: "Scaling required"

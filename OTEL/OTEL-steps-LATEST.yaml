@@ -1,0 +1,276 @@
+# =========================================================
+#  WORKFLOW (Production-style Observability Pipeline)
+#
+# Spring Boot App (/actuator/prometheus)
+#   → exposes JVM, HTTP, and application metrics via Micrometer
+#
+# OTEL Agent (DaemonSet)
+#   → scrapes metrics from application endpoints
+#   → runs on every node (node-local collection, reduces load)
+#
+# OTEL Gateway (Deployment)
+#   → aggregates metrics from all agents
+#   → acts as centralized pipeline (scalable, controllable)
+#
+# Kubernetes Service (otel-gateway)
+#   → exposes a stable /metrics endpoint inside cluster
+#
+# Prometheus (static scrape)
+#   → scrapes OTEL Gateway instead of apps directly
+#   → simplifies configuration and avoids service discovery complexity
+#
+# Grafana
+#   → queries Prometheus and visualizes metrics
+#
+# =========================================================
+#
+#  COMMANDS + PURPOSE (STEP-BY-STEP)
+#
+#  Deploy OTEL Stack
+# kubectl apply -f otel-observability.yaml
+#
+#  Purpose
+# - Creates namespace
+# - Deploys OTEL Agent (DaemonSet)
+# - Deploys OTEL Gateway (Deployment)
+# - Exposes /metrics via service
+#
+# ---------------------------------------------------------
+#
+# Verify OTEL Components
+# kubectl get pods -n observability
+#
+#  Expected
+# - otel-agent → running on each node
+# - otel-gateway → 1 pod running
+#
+# ---------------------------------------------------------
+#
+# Validate Metrics at Gateway
+# kubectl port-forward svc/otel-gateway 8889:8889 -n observability
+# curl http://localhost:8889/metrics
+#
+#  Purpose
+# - Confirms OTEL is scraping Spring Boot
+# - Confirms metrics are aggregated and exposed
+#
+# ---------------------------------------------------------
+#
+# Connect Prometheus (already configured)
+#
+# Prometheus scrapes:
+# otel-gateway.observability.svc.cluster.local:8889
+#
+#  Purpose
+# - Single scrape target (clean & scalable)
+# - No service discovery complexity
+#
+# ---------------------------------------------------------
+#
+# Verify in Prometheus UI
+# Status → Targets → otel → UP
+#
+#  Purpose
+# - Confirms Prometheus → OTEL connectivity
+#
+# ---------------------------------------------------------
+#
+# Visualize in Grafana
+#
+# Example queries:
+# jvm_memory_used_bytes
+# http_server_requests_seconds_count
+# process_cpu_usage
+#
+#  Purpose
+# - Confirms full pipeline:
+#   Spring Boot → OTEL → Prometheus → Grafana
+#
+# ---------------------------------------------------------
+#
+#  FINAL ARCHITECTURE (WHAT YOU BUILT)
+#
+# Spring Boot
+#    ↓
+# OTEL Agent (DaemonSet)
+#    ↓
+# OTEL Gateway (Deployment)
+#    ↓
+# Prometheus (static scrape)
+#    ↓
+# Grafana
+#
+# ---------------------------------------------------------
+#
+# WHY THIS DESIGN IS STRONG (INTERVIEW LEVEL)
+#
+# - Vendor-neutral (OTEL)
+#   → Not tied to Prometheus or any backend
+#
+# - Decoupled architecture
+#   → Application does NOT push metrics
+#   → Collector handles pipeline
+#
+# - Scalable design
+#   → Agent + Gateway pattern supports large clusters
+#
+# - Minimal & debuggable
+#   → No Helm/operator complexity
+#   → Full control over configs
+#
+# =========================================================
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+
+---
+# =========================
+# OTEL AGENT CONFIG (DaemonSet)
+# =========================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-agent-config
+  namespace: observability
+data:
+  otel-agent-config.yaml: |
+    receivers:
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: springboot
+              metrics_path: /actuator/prometheus
+              scrape_interval: 15s
+              static_configs:
+                - targets:
+                    - springboot-service.app.svc.cluster.local:80
+
+    exporters:
+      otlp:
+        endpoint: otel-gateway.observability.svc.cluster.local:4317
+        tls:
+          insecure: true
+
+    service:
+      pipelines:
+        metrics:
+          receivers: [prometheus]
+          exporters: [otlp]
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: otel-agent
+  namespace: observability
+spec:
+  selector:
+    matchLabels:
+      app: otel-agent
+  template:
+    metadata:
+      labels:
+        app: otel-agent
+    spec:
+      containers:
+        - name: otel-agent
+          image: otel/opentelemetry-collector:0.102.0
+          args:
+            - "--config=/conf/otel-agent-config.yaml"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+      volumes:
+        - name: config
+          configMap:
+            name: otel-agent-config
+
+---
+# =========================
+# OTEL GATEWAY CONFIG (Deployment)
+# =========================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-gateway-config
+  namespace: observability
+data:
+  otel-gateway-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+
+    exporters:
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+
+    service:
+      pipelines:
+        metrics:
+          receivers: [otlp]
+          exporters: [prometheus]
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-gateway
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-gateway
+  template:
+    metadata:
+      labels:
+        app: otel-gateway
+    spec:
+      containers:
+        - name: otel-gateway
+          image: otel/opentelemetry-collector:0.102.0
+          args:
+            - "--config=/conf/otel-gateway-config.yaml"
+          ports:
+            - containerPort: 4317
+            - containerPort: 8889
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+      volumes:
+        - name: config
+          configMap:
+            name: otel-gateway-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-gateway
+  namespace: observability
+spec:
+  selector:
+    app: otel-gateway
+  ports:
+    - name: otlp
+      port: 4317
+      targetPort: 4317
+    - name: metrics
+      port: 8889
+      targetPort: 8889

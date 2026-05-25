@@ -1,0 +1,159 @@
+otel_vs_prometheus_concepts:
+
+  definitions:
+
+    prometheus_scraping:
+      description: >
+        Prometheus directly discovers and scrapes metrics from application
+        endpoints (e.g., /actuator/prometheus) using ServiceMonitor/PodMonitor.
+
+    opentelemetry_collector:
+      description: >
+        A vendor-neutral telemetry pipeline that collects, processes,
+        and exports metrics, logs, and traces to multiple backends.
+
+  core_difference:
+
+    prometheus_model:
+      architecture: "Pull-based"
+      flow: "Prometheus → scrapes → Application"
+      responsibility:
+        - "Scraping"
+        - "Storage"
+        - "Querying"
+      limitation: "Tightly coupled design"
+
+    otel_model:
+      architecture: "Pipeline-based (pull + push capable)"
+      flow: "Application → OTEL Collector → Backend (Prometheus/Mimir/etc.)"
+      responsibility:
+        - "Collection"
+        - "Processing"
+        - "Routing"
+      advantage: "Decoupled and extensible"
+
+  why_enterprises_prefer_otel:
+
+    decoupling:
+      description: >
+        Separates telemetry collection from storage backend.
+      benefit: >
+        Backend can be changed (Prometheus → Mimir/Datadog) without touching apps.
+
+    multi_signal_support:
+      description: >
+        OTEL supports metrics, logs, and traces in one pipeline.
+      benefit: >
+        Unified observability instead of managing multiple tools separately.
+
+    vendor_neutrality:
+      description: >
+        Open standard supported across cloud providers and tools.
+      benefit: >
+        Avoids vendor lock-in.
+
+    centralized_processing:
+      description: >
+        OTEL can filter, batch, enrich, and transform telemetry.
+      benefit: >
+        Reduced noise, lower storage cost, better signal quality.
+
+    scalability:
+      description: >
+        OTEL collectors can be horizontally scaled.
+      benefit: >
+        Suitable for high-throughput, large-scale systems.
+
+    security_and_control:
+      description: >
+        Control data flow centrally instead of exposing all app endpoints.
+      benefit: >
+        Improved security posture and governance.
+
+    hybrid_and_multi_cloud:
+      description: >
+        OTEL can route data to multiple destinations simultaneously.
+      benefit: >
+        Enables multi-region, multi-cloud observability strategies.
+
+  real_world_use_cases:
+
+    use_case_1:
+      name: backend_migration
+      scenario: >
+        Organization migrates from Prometheus to Mimir.
+      without_otel: "Requires reconfiguring all scrape targets"
+      with_otel: "Only OTEL exporter changes"
+      value: "Zero application impact"
+
+    use_case_2:
+      name: multi_destination_routing
+      scenario: >
+        Send metrics to Prometheus and Datadog simultaneously.
+      solution: "OTEL exports to multiple backends"
+      value: "Supports gradual migration and redundancy"
+
+    use_case_3:
+      name: cost_optimization
+      scenario: >
+        High cardinality metrics causing storage explosion.
+      solution: "OTEL filters/drops unnecessary labels"
+      value: "Reduced storage cost"
+
+      What is Cardinality?
+      Cardinality = number of unique time series
+      In Prometheus:
+      Time Series = metric_name + unique combination of labels
+      High cardinality means a metric has too many unique label combinations, creating a huge number of time series.
+
+      Simple Example:
+      Metric: http_requests_total{method="GET", status="200"}
+      Low cardinality (few combinations)
+
+      Now add:
+      http_requests_total{user_id="12345"}
+
+      problem: user_id can have millions of unique values → millions of time series → high cardinality → storage and performance issues in Prometheus.
+
+    use_case_4:
+      name: unified_observability
+      scenario: >
+        Need metrics + logs + traces correlation.
+      solution: "OTEL handles all signals"
+      value: "Faster debugging and RCA"
+
+    use_case_5:
+      name: edge_collection
+      scenario: >
+        Applications running across multiple clusters/regions.
+      solution: "Local OTEL collectors aggregate data"
+      value: "Reduced network overhead and latency"
+
+    use_case_6:
+      name: security_compliance
+      scenario: >
+        Restrict direct access to application metrics endpoints.
+      solution: "Only OTEL collectors access applications"
+      value: "Improved compliance and access control"
+
+  benefits_summary:
+
+    - "Decoupled architecture (collection vs storage)"
+    - "Supports metrics, logs, and traces"
+    - "Vendor-neutral and future-proof"
+    - "Centralized processing (filtering, batching, enrichment)"
+    - "Scalable and flexible"
+    - "Enables multi-backend routing"
+    - "Improves security and governance"
+
+  tradeoffs:
+
+    - "Additional component to manage"
+    - "Slight increase in latency"
+
+  sre_interview_statement: >
+    Enterprises prefer OpenTelemetry because it decouples telemetry collection
+    from backend storage, enabling flexible, vendor-neutral observability.
+    Unlike Prometheus scraping, OTEL introduces a centralized pipeline that
+    supports multiple signals, advanced processing, and scalable architectures,
+    making it suitable for large-scale, multi-cloud environments.

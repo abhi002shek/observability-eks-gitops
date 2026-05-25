@@ -1,0 +1,10 @@
+grafana:
+  grafana.ini:
+    smtp:
+      enabled: true
+      host: smtp.gmail.com:587
+      user: techapricate@gmail.com
+      password: <YOUR_APP_PASSWORD>
+      skip_verify: true
+      from_address: techapricate@gmail.com
+      from_name: Grafana Alerts

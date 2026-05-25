@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: otel-collector
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: otel
+  template:
+    metadata:
+      labels:
+        app: otel
+    spec:
+      containers:
+        - name: otel
+          image: otel/opentelemetry-collector:latest
+          args: ["--config=/etc/otel-config.yaml"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc
+      volumes:
+        - name: config
+          configMap:
+            name: otel-config
