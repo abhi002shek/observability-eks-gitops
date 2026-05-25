@@ -17,6 +17,9 @@ echo " STEP 2: Install Prometheus + Grafana + AlertManager"
 echo "======================================"
 kubectl create namespace $NAMESPACE
 
+# Create Slack webhook secret BEFORE helm install (never stored in Git)
+bash alertmanager/create-slack-secret.sh
+
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo add grafana https://grafana.github.io/helm-charts
 helm repo update
