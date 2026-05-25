@@ -24,7 +24,7 @@ alertmanager:
     receivers:
       - name: 'slack-sre'
         slack_configs:
-          - api_url: 'YOUR_SLACK_WEBHOOK_URL'   # replace with real webhook
+          - api_url: 'YOUR_WEBHOOK_HERE'
             channel: '#sre-alerts'
             title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
             text: |
