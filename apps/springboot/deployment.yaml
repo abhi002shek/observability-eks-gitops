@@ -28,7 +28,7 @@ spec:
             - name: OTEL_SERVICE_NAME
               value: "springboot-app"
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: "http://otel-agent.observability.svc.cluster.local:4318"
+              value: "http://otel-gateway.observability.svc.cluster.local:4318"
             - name: OTEL_EXPORTER_OTLP_PROTOCOL
               value: "http/protobuf"
             - name: OTEL_TRACES_EXPORTER
